@@ -6,6 +6,17 @@ __pycache__/
 # C extensions
 *.so
 
+# Windows reserved device names (cannot be tracked on Windows)
+**/PRN.csv
+**/CON.csv
+**/NUL.csv
+**/AUX.csv
+**/COM[0-9].csv
+**/LPT[0-9].csv
+
+# Dataset (too large for git - 2.5GB+)
+backend/dataset_of_stocks/
+
 # Distribution / packaging
 .Python
 build/
@@ -133,7 +144,6 @@ celerybeat.pid
 
 # SageMath parsed files
 *.sage.py
-
 # Environments
 .env
 .envrc
@@ -143,6 +153,8 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+./backend/venv
+./backend/.env
 
 # Spyder project settings
 .spyderproject
