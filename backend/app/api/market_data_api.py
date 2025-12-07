@@ -1,18 +1,24 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, func, and_
 from typing import List, Optional
 from datetime import datetime, timedelta
+from pathlib import Path
 import httpx
 import logging
+import pandas as pd
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 from app.core.database import get_db
 from app.core.config import settings
-from app.models.stock_ohlc import StockOHLC
+from app.models.stock import StockPrice
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+executor = ThreadPoolExecutor(max_workers=4)
 
 
 class MassiveAPIClient:
@@ -23,16 +29,6 @@ class MassiveAPIClient:
         self.client = httpx.AsyncClient(timeout=30.0)
     
     async def get_daily_ohlc(self, symbol: str, date: str) -> dict:
-        """
-        Fetch daily OHLC data for a stock symbol
-        
-        Args:
-            symbol: Stock ticker symbol (e.g., 'AAPL')
-            date: Date in YYYY-MM-DD format
-            
-        Returns:
-            Dictionary with OHLC data
-        """
         url = f"{self.BASE_URL}/open-close/{symbol}/{date}"
         params = {
             "adjusted": "true",
@@ -51,46 +47,46 @@ class MassiveAPIClient:
         await self.client.aclose()
 
 
-async def save_ohlc_data(db: AsyncSession, ohlc_data: dict) -> StockOHLC:
+async def save_stock_data(db: AsyncSession, stock_data: dict) -> StockPrice:
     # if record already exists
-    stmt = select(StockOHLC).where(
-        StockOHLC.symbol == ohlc_data.get("symbol"),
-        StockOHLC.date == ohlc_data.get("from")
+    stmt = select(StockPrice).where(
+        StockPrice.symbol == stock_data.get("symbol"),
+        StockPrice.date == stock_data.get("from")
     )
     result = await db.execute(stmt)
     existing = result.scalar_one_or_none()
     
     if existing:
         # update existing record
-        existing.open = ohlc_data.get("open")
-        existing.high = ohlc_data.get("high")
-        existing.low = ohlc_data.get("low")
-        existing.close = ohlc_data.get("close")
-        existing.volume = ohlc_data.get("volume")
-        existing.after_hours = ohlc_data.get("afterHours")
-        existing.pre_market = ohlc_data.get("preMarket")
-        existing.status = ohlc_data.get("status")
+        existing.open = stock_data.get("open")
+        existing.high = stock_data.get("high")
+        existing.low = stock_data.get("low")
+        existing.close = stock_data.get("close")
+        existing.volume = stock_data.get("volume")
+        existing.after_hours = stock_data.get("afterHours")
+        existing.pre_market = stock_data.get("preMarket")
+        existing.status = stock_data.get("status")
         existing.updated_at = datetime.utcnow()
         await db.commit()
         await db.refresh(existing)
         return existing
     else:
-        stock_ohlc = StockOHLC(
-            symbol=ohlc_data.get("symbol"),
-            date=ohlc_data.get("from"),
-            open=ohlc_data.get("open"),
-            high=ohlc_data.get("high"),
-            low=ohlc_data.get("low"),
-            close=ohlc_data.get("close"),
-            volume=ohlc_data.get("volume"),
-            after_hours=ohlc_data.get("afterHours"),
-            pre_market=ohlc_data.get("preMarket"),
-            status=ohlc_data.get("status")
+        stock = StockPrice(
+            symbol=stock_data.get("symbol"),
+            date=stock_data.get("from"),
+            open=stock_data.get("open"),
+            high=stock_data.get("high"),
+            low=stock_data.get("low"),
+            close=stock_data.get("close"),
+            volume=stock_data.get("volume"),
+            after_hours=stock_data.get("afterHours"),
+            pre_market=stock_data.get("preMarket"),
+            status=stock_data.get("status")
         )
-        db.add(stock_ohlc)
+        db.add(stock)
         await db.commit()
-        await db.refresh(stock_ohlc)
-        return stock_ohlc
+        await db.refresh(stock)
+        return stock
 
 
 @router.get("/stock/{symbol}/latest")
@@ -98,9 +94,9 @@ async def get_latest_stock_data(
     symbol: str,
     db: AsyncSession = Depends(get_db)
 ):
-    stmt = select(StockOHLC).where(
-        StockOHLC.symbol == symbol.upper()
-    ).order_by(desc(StockOHLC.date)).limit(1)
+    stmt = select(StockPrice).where(
+        StockPrice.symbol == symbol.upper()
+    ).order_by(desc(StockPrice.date)).limit(1)
     
     result = await db.execute(stmt)
     stock_data = result.scalar_one_or_none()
@@ -117,9 +113,9 @@ async def get_stock_history(
     limit: int = 30,
     db: AsyncSession = Depends(get_db)
 ):
-    stmt = select(StockOHLC).where(
-        StockOHLC.symbol == symbol.upper()
-    ).order_by(desc(StockOHLC.date)).limit(limit)
+    stmt = select(StockPrice).where(
+        StockPrice.symbol == symbol.upper()
+    ).order_by(desc(StockPrice.date)).limit(limit)
     
     result = await db.execute(stmt)
     stock_data = result.scalars().all()
@@ -137,14 +133,14 @@ async def get_all_latest_stocks(
     from sqlalchemy import func
     
     subquery = select(
-        StockOHLC.symbol,
-        func.max(StockOHLC.date).label('max_date')
-    ).group_by(StockOHLC.symbol).subquery()
+        StockPrice.symbol,
+        func.max(StockPrice.date).label('max_date')
+    ).group_by(StockPrice.symbol).subquery()
     
-    stmt = select(StockOHLC).join(
+    stmt = select(StockPrice).join(
         subquery,
-        (StockOHLC.symbol == subquery.c.symbol) & 
-        (StockOHLC.date == subquery.c.max_date)
+        (StockPrice.symbol == subquery.c.symbol) & 
+        (StockPrice.date == subquery.c.max_date)
     )
     
     result = await db.execute(stmt)
@@ -169,11 +165,298 @@ async def fetch_and_save_stock_data(
     client = MassiveAPIClient(settings.MASSIVE_API_KEY)
     
     try:
-        ohlc_data = await client.get_daily_ohlc(symbol.upper(), date)
-        stock = await save_ohlc_data(db, ohlc_data)
+        stock_data = await client.get_daily_ohlc(symbol.upper(), date)
+        stock = await save_stock_data(db, stock_data)
         return {
             "message": f"Successfully fetched and saved data for {symbol}",
             "data": stock.to_dict()
         }
     finally:
         await client.close()
+
+
+@router.get("/stock/csv/available")
+async def get_available_csv_symbols():
+    dataset_path = Path(__file__).parent.parent.parent / "dataset_of_stocks" / "stocks"
+    
+    if not dataset_path.exists():
+        raise HTTPException(status_code=404, detail="Dataset directory not found")
+    
+    try:
+        csv_files = list(dataset_path.glob("*.csv"))
+
+        symbols = sorted([f.stem for f in csv_files])
+        
+        return {
+            "count": len(symbols),
+            "symbols": symbols
+        }
+    except Exception as e:
+        logger.error(f"Error reading CSV directory: {e}")
+        raise HTTPException(status_code=500, detail=f"Error reading CSV directory: {str(e)}")
+
+
+def _read_stock_csv(symbol: str, dataset_path: Path) -> Optional[dict]:
+    try:
+        csv_path = dataset_path / f"{symbol}.csv"
+        if not csv_path.exists():
+            return None
+        
+        df = pd.read_csv(csv_path)
+        if df.empty:
+            return None
+        
+        # Get latest data
+        latest = df.iloc[-1]
+        first = df.iloc[0]
+        
+        # Calculate statistics
+        close_price = float(latest['close'])
+        open_price = float(latest['open'])
+        high_price = float(latest['high'])
+        low_price = float(latest['low'])
+        volume = int(latest.get('volume', 0))
+        
+        # Calculate change
+        if len(df) > 1:
+            prev_close = float(df.iloc[-2]['close'])
+            change = close_price - prev_close
+            change_pct = (change / prev_close * 100) if prev_close > 0 else 0
+        else:
+            change = 0
+            change_pct = 0
+        
+        # Calculate 52-week high/low
+        recent_df = df.tail(252)
+        week_52_high = float(recent_df['high'].max())
+        week_52_low = float(recent_df['low'].min())
+        
+        # Calculate average volume
+        avg_volume = int(df['volume'].tail(20).mean()) if 'volume' in df.columns else 0
+        
+        return {
+            'symbol': symbol,
+            'open': open_price,
+            'high': high_price,
+            'low': low_price,
+            'close': close_price,
+            'volume': volume,
+            'change': round(change, 2),
+            'change_pct': round(change_pct, 2),
+            'week_52_high': week_52_high,
+            'week_52_low': week_52_low,
+            'avg_volume': avg_volume,
+            'total_records': len(df),
+            'first_date': str(first.get('date', '')),
+            'last_date': str(latest.get('date', ''))
+        }
+    except Exception as e:
+        logger.error(f"Error reading CSV for {symbol}: {e}")
+        return None
+
+
+@router.get("/stocks/all")
+async def get_all_stocks_data(
+    page: int = Query(1, ge=1, description="Page number"),
+    per_page: int = Query(50, ge=10, le=200, description="Items per page"),
+    search: Optional[str] = Query(None, description="Search by symbol"),
+    sort_by: str = Query("symbol", description="Sort by field"),
+    sort_order: str = Query("asc", description="Sort order: asc or desc"),
+    min_price: Optional[float] = Query(None, description="Minimum price filter"),
+    max_price: Optional[float] = Query(None, description="Maximum price filter"),
+    min_change_pct: Optional[float] = Query(None, description="Minimum change % filter"),
+    max_change_pct: Optional[float] = Query(None, description="Maximum change % filter"),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        subquery = select(
+            StockPrice.symbol,
+            func.max(StockPrice.date).label('max_date')
+        ).group_by(StockPrice.symbol).subquery()
+        
+        stmt = select(StockPrice).join(
+            subquery,
+            and_(
+                StockPrice.symbol == subquery.c.symbol,
+                StockPrice.date == subquery.c.max_date
+            )
+        )
+        
+        result = await db.execute(stmt)
+        db_stocks = result.scalars().all()
+        
+        source = "database"
+        stocks = []
+        
+        if db_stocks and len(db_stocks) > 0:
+            for stock in db_stocks:
+                prev_stmt = select(StockPrice).where(
+                    StockPrice.symbol == stock.symbol,
+                    StockPrice.date < stock.date
+                ).order_by(desc(StockPrice.date)).limit(1)
+                prev_result = await db.execute(prev_stmt)
+                prev_stock = prev_result.scalar_one_or_none()
+                
+                close_price = float(stock.close)
+                if prev_stock:
+                    prev_close = float(prev_stock.close)
+                    change = close_price - prev_close
+                    change_pct = (change / prev_close * 100) if prev_close > 0 else 0
+                else:
+                    change = 0
+                    change_pct = 0
+                
+                stocks.append({
+                    'symbol': stock.symbol,
+                    'open': float(stock.open) if stock.open else 0,
+                    'high': float(stock.high) if stock.high else 0,
+                    'low': float(stock.low) if stock.low else 0,
+                    'close': close_price,
+                    'volume': int(stock.volume) if stock.volume else 0,
+                    'change': round(change, 2),
+                    'change_pct': round(change_pct, 2),
+                    'week_52_high': close_price,  # Placeholder
+                    'week_52_low': close_price,   # Placeholder
+                    'avg_volume': int(stock.volume) if stock.volume else 0,
+                    'total_records': 1,
+                    'first_date': str(stock.date),
+                    'last_date': str(stock.date),
+                    'source': 'database'
+                })
+        else:
+            source = "csv"
+            dataset_path = Path(__file__).parent.parent.parent / "dataset_of_stocks" / "stocks"
+            
+            if not dataset_path.exists():
+                raise HTTPException(status_code=404, detail="No data available (DB empty, CSV not found)")
+            
+            csv_files = list(dataset_path.glob("*.csv"))
+            all_symbols = sorted([f.stem for f in csv_files])
+            
+            loop = asyncio.get_event_loop()
+            tasks = [
+                loop.run_in_executor(executor, _read_stock_csv, symbol, dataset_path)
+                for symbol in all_symbols
+            ]
+            results = await asyncio.gather(*tasks)
+            stocks = [r for r in results if r is not None]
+            for s in stocks:
+                s['source'] = 'csv'
+
+        if search:
+            search_upper = search.upper()
+            stocks = [s for s in stocks if search_upper in s['symbol'].upper()]
+
+        if min_price is not None:
+            stocks = [s for s in stocks if s['close'] >= min_price]
+        if max_price is not None:
+            stocks = [s for s in stocks if s['close'] <= max_price]
+        if min_change_pct is not None:
+            stocks = [s for s in stocks if s['change_pct'] >= min_change_pct]
+        if max_change_pct is not None:
+            stocks = [s for s in stocks if s['change_pct'] <= max_change_pct]
+
+        reverse = sort_order.lower() == 'desc'
+        if sort_by in ['symbol', 'close', 'change', 'change_pct', 'volume', 'week_52_high', 'week_52_low']:
+            stocks = sorted(stocks, key=lambda x: x.get(sort_by, 0) or 0, reverse=reverse)
+        
+        total_count = len(stocks)
+
+        start_idx = (page - 1) * per_page
+        end_idx = start_idx + per_page
+        paginated_stocks = stocks[start_idx:end_idx]
+        
+        return {
+            'stocks': paginated_stocks,
+            'source': source,
+            'pagination': {
+                'page': page,
+                'per_page': per_page,
+                'total': total_count,
+                'total_pages': (total_count + per_page - 1) // per_page
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error getting all stocks: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/stock/csv/{symbol}")
+async def get_stock_csv_data(
+    symbol: str,
+    days: int = Query(365, ge=1, le=10000, description="Number of days of history"),
+    db: AsyncSession = Depends(get_db)
+):
+    symbol = symbol.upper()
+    
+    stmt = select(StockPrice).where(
+        StockPrice.symbol == symbol
+    ).order_by(desc(StockPrice.date)).limit(days)
+    
+    result = await db.execute(stmt)
+    db_records = result.scalars().all()
+    
+    if db_records and len(db_records) > 0:
+        records = [r.to_dict() for r in reversed(db_records)]  # Oldest first
+        latest = db_records[0]  # Most recent
+        close_price = float(latest.close)
+        
+        if len(db_records) > 1:
+            prev_close = float(db_records[1].close)
+            change = close_price - prev_close
+            change_pct = (change / prev_close * 100) if prev_close > 0 else 0
+        else:
+            change = 0
+            change_pct = 0
+        
+        return {
+            'symbol': symbol,
+            'source': 'database',
+            'current_price': close_price,
+            'change': round(change, 2),
+            'change_pct': round(change_pct, 2),
+            'total_records': len(records),
+            'history': records
+        }
+
+    dataset_path = Path(__file__).parent.parent.parent / "dataset_of_stocks" / "stocks"
+    csv_path = dataset_path / f"{symbol}.csv"
+    
+    if not csv_path.exists():
+        raise HTTPException(status_code=404, detail=f"No data found for {symbol}")
+    
+    try:
+        df = pd.read_csv(csv_path)
+        if df.empty:
+            raise HTTPException(status_code=404, detail=f"No data found for {symbol}")
+        
+        # Get last N days
+        df = df.tail(days)
+        
+        # Convert to list of dicts
+        records = df.to_dict('records')
+        
+        # Get summary stats
+        latest = df.iloc[-1]
+        close_price = float(latest['close'])
+        
+        if len(df) > 1:
+            prev_close = float(df.iloc[-2]['close'])
+            change = close_price - prev_close
+            change_pct = (change / prev_close * 100) if prev_close > 0 else 0
+        else:
+            change = 0
+            change_pct = 0
+        
+        return {
+            'symbol': symbol,
+            'source': 'csv',
+            'current_price': close_price,
+            'change': round(change, 2),
+            'change_pct': round(change_pct, 2),
+            'total_records': len(records),
+            'history': records
+        }
+    except Exception as e:
+        logger.error(f"Error reading CSV for {symbol}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

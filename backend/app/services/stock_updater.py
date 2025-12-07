@@ -1,176 +1,83 @@
 import asyncio
 import logging
-from datetime import datetime, timedelta
-from typing import List
-from sqlalchemy.ext.asyncio import AsyncSession
-import httpx
+from contextlib import asynccontextmanager
 
 from app.core.database import async_session_maker
-from app.core.config import settings
-from app.api.market_data_api import MassiveAPIClient, save_ohlc_data
+from app.services.stock_data_service import stock_data_service
 
 logger = logging.getLogger(__name__)
 
+_update_task = None
+_is_running = False
 
-class StockDataUpdater:
-    """
-    These stocks are updated from Massive API (real-time data).
-    """
+
+async def stock_price_updater():
+    global _is_running
     
-    # list of stock symbols to track via API because of rate limiting on Massive API (5 requests/min)
-    TRACKED_STOCKS = [
-        "AAPL",    # Apple
-        "MSFT",    # Microsoft
-        "AMZN",    # Amazon
-        "GOOGL",   # Alphabet (Google)
-        "META",    # Meta (Facebook)
-        "TSLA",    # Tesla
-        "NVDA",    # NVIDIA
-        "JPM",     # JPMorgan Chase
-        "V",       # Visa
-        "WMT",     # Walmart
-        "JNJ",     # Johnson & Johnson
-        "PG",      # Procter & Gamble
-        "MA",      # Mastercard
-        "UNH",     # UnitedHealth
-        "HD",      # Home Depot
-    ]
+    logger.info("Stock price updater task started")
     
-    def __init__(self):
-        self.is_running = False
-        self.api_client = None
-        self.current_batch_index = 0
-        
-    async def initialize(self):
-        if not hasattr(settings, 'MASSIVE_API_KEY') or not settings.MASSIVE_API_KEY:
-            logger.warning("MASSIVE_API_KEY not configured. Stock data updates will not run.")
-            return False
-        
-        self.api_client = MassiveAPIClient(settings.MASSIVE_API_KEY)
-        logger.info("Stock Data Updater initialized")
-        return True
-    
-    async def fetch_and_save_batch(self, symbols: List[str], date: str):
-        """
-        Args:
-            symbols: list of stock symbols (max 5 for rate limiting)
-            date: YYYY-MM-DD format
-        """
-        async with async_session_maker() as db:
-            for symbol in symbols:
-                try:
-                    logger.info(f"Fetching data for {symbol} on {date}")
-                    ohlc_data = await self.api_client.get_daily_ohlc(symbol, date)
-                    await save_ohlc_data(db, ohlc_data)
-                    logger.info(f"Successfully saved data for {symbol}")
-                except Exception as e:
-                    logger.error(f"Error processing {symbol}: {e}")
-                    continue
-    
-    def get_next_batch(self) -> List[str]:
-        """
-        Get the next batch of 5 stocks to update.
-        Rotates through all tracked stocks.
-        """
-        batch_size = 5
-        total_stocks = len(self.TRACKED_STOCKS)
-        
-        # calculate the starting index for this batch
-        start_idx = self.current_batch_index
-        end_idx = start_idx + batch_size
-        
-        # get the batch (with wrapping)
-        if end_idx <= total_stocks:
-            batch = self.TRACKED_STOCKS[start_idx:end_idx]
-            self.current_batch_index = end_idx % total_stocks
-        else:
-            # wrap around to the beginning
-            batch = self.TRACKED_STOCKS[start_idx:] + self.TRACKED_STOCKS[:end_idx - total_stocks]
-            self.current_batch_index = end_idx % total_stocks
-        
-        return batch
-    
-    def get_latest_trading_date(self) -> str:
-        today = datetime.now()
-        
-        # start checking from 1 day ago
-        for days_back in range(1, 8):
-            check_date = today - timedelta(days=days_back)
-            
-            # skip weekends (Saturday=5, Sunday=6)
-            if check_date.weekday() in [5, 6]:
-                continue
-            
-            # return the first weekday we find
-            return check_date.strftime("%Y-%m-%d")
-        
-        # fallback: return 3 days ago
-        return (today - timedelta(days=3)).strftime("%Y-%m-%d")
-    
-    async def update_cycle(self):
-        """
-        This runs every 5 minutes to respect rate limits.
-        """
-        # get the most recent likely trading day (skip weekends)
-        date = self.get_latest_trading_date()
-        
-        # get next batch of stocks
-        batch = self.get_next_batch()
-        
-        logger.info(f"Starting update cycle for batch: {batch}")
-        logger.info(f"Date: {date}, Batch index: {self.current_batch_index}")
-        
+    while _is_running:
         try:
-            await self.fetch_and_save_batch(batch, date)
-            logger.info(f"Completed update cycle for batch: {batch}")
-        except Exception as e:
-            logger.error(f"Error in update cycle: {e}")
-    
-    async def run(self):
-        """
-        main loop that runs continuously, updating stocks every 5 minutes.
-        rotates through all tracked stocks, 5 at a time.
-        """
-        initialized = await self.initialize()
-        if not initialized:
-            logger.error("Failed to initialize Stock Data Updater")
-            return
-        
-        self.is_running = True
-        logger.info("Stock Data Updater started")
-        logger.info(f"Tracking {len(self.TRACKED_STOCKS)} stocks: {', '.join(self.TRACKED_STOCKS)}")
-        logger.info("Update interval: 5 minutes per batch (5 stocks)")
-        
-        try:
-            while self.is_running:
-                await self.update_cycle()
-                
-                # wait 5 minutes before next batch (respecting rate limit)
-                logger.info("Waiting 5 minutes before next update cycle...")
-                await asyncio.sleep(300)
-                
+            logger.info("Updating stock prices...")
+            
+            async with async_session_maker() as db:
+                await stock_data_service.update_stock_prices(db)
+            
+            logger.info("Stock prices updated successfully")
+            
+            await asyncio.sleep(300)
+            
         except asyncio.CancelledError:
-            logger.info("Stock Data Updater cancelled")
+            logger.info("Stock price updater task cancelled")
+            break
         except Exception as e:
-            logger.error(f"Fatal error in Stock Data Updater: {e}")
-        finally:
-            await self.stop()
-    
-    async def stop(self):
-        """Stop the updater and cleanup"""
-        self.is_running = False
-        if self.api_client:
-            await self.api_client.close()
-        logger.info("Stock Data Updater stopped")
+            logger.error(f"Error in stock price updater: {e}")
+            await asyncio.sleep(60)
 
 
-stock_updater = StockDataUpdater()
+async def initialize_stock_data():
+    try:
+        logger.info("Initializing stock data...")
+        
+        async with async_session_maker() as db:
+            await stock_data_service.initialize_tracked_stocks(db)
+
+            await stock_data_service.load_all_available_stocks(db, days=None)
+        
+        logger.info("Stock data initialization completed")
+        
+    except Exception as e:
+        logger.error(f"Error initializing stock data: {e}")
+        raise
 
 
 async def start_stock_updater():
-    asyncio.create_task(stock_updater.run())
-    logger.info("Stock data updater background task created")
+    global _update_task, _is_running
+    
+    if _update_task is not None:
+        logger.warning("Stock updater already running")
+        return
+
+    await initialize_stock_data()
+    
+    _is_running = True
+    _update_task = asyncio.create_task(stock_price_updater())
+    logger.info("Stock price updater started (updates every 5 minutes)")
 
 
 async def stop_stock_updater():
-    await stock_updater.stop()
+    global _update_task, _is_running
+    
+    if _update_task is None:
+        return
+    
+    _is_running = False
+    _update_task.cancel()
+    
+    try:
+        await _update_task
+    except asyncio.CancelledError:
+        pass
+    
+    _update_task = None
+    logger.info("Stock price updater stopped")

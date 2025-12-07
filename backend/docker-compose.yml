@@ -19,12 +19,13 @@ services:
   coordination_api:
     build: .
     container_name: coordination_api
-    command: python -m uvicorn app.main:app --host 0.0.0.0 --port 8003 --reload
+    command: python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     ports:
-      - "8003:8003"
+      - "8000:8000"
     volumes:
       - ./app:/app/app
       - ./dataset_of_stocks:/app/dataset_of_stocks
+      - ./models:/app/models
     environment:
       DB_HOST: postgres
       DB_PORT: 5432

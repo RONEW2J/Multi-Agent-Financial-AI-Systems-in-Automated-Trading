@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     MODEL_THRESHOLD_SELL: float = 0.4
 
     LOG_LEVEL: str = "INFO"
+
+    SECRET_KEY: str = Field(
+        default="your-secret-key-please-change-in-production-use-openssl-rand-hex-32",
+        description="Secret key for JWT tokens"
+    )
     
     model_config = {
         "env_file": [".env", "../.env"],

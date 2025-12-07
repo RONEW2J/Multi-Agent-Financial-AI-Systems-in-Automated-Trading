@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.core.database import async_session_maker, create_tables
-from app.models.stock_ohlc import StockOHLC
+from app.models.stock import StockPrice
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -93,16 +93,16 @@ async def load_csv_to_database(symbol: str, csv_path: Path, days_limit: int = 30
             async with async_session_maker() as db:
                 inserted = 0
                 for record in records:
-                    stmt = select(StockOHLC).where(
-                        StockOHLC.symbol == record['symbol'],
-                        StockOHLC.date == record['date']
+                    stmt = select(StockPrice).where(
+                        StockPrice.symbol == record['symbol'],
+                        StockPrice.date == record['date']
                     )
                     result = await db.execute(stmt)
                     existing = result.scalar_one_or_none()
                     
                     if not existing:
-                        stock_ohlc = StockOHLC(**record)
-                        db.add(stock_ohlc)
+                        stock = StockPrice(**record)
+                        db.add(stock)
                         inserted += 1
                 
                 await db.commit()

@@ -14,6 +14,6 @@ COPY . .
 
 RUN mkdir -p models
 
-EXPOSE 8000 8001 8002 8003
+EXPOSE 8000
 
 CMD ["python", "-m", "app.main"]

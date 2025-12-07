@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import sys
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -7,6 +8,18 @@ from app.core.config import settings
 from app.core.database import create_tables
 from app.api.routes import router
 from app.services.stock_updater import start_stock_updater, stop_stock_updater
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+
+logging.getLogger("app").setLevel(logging.INFO)
+logging.getLogger("app.agents").setLevel(logging.INFO)
 
 logger = logging.getLogger("main")
 
