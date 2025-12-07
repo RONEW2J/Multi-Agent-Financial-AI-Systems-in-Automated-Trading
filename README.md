@@ -1102,24 +1102,31 @@ curl http://localhost:8000/api/health
 
 ---
 
-#### 13. Performance Metrics
+#### 13. Trading Pipeline
+*Reasons, Methods, Change metrics and execution decisions*
+
+![Performance](screenshots/13_trading_pipeline.png)
+
+---
+
+#### 14. Performance Metrics
 *System performance and prediction accuracy*
 
-![Performance](screenshots/13_performance.png)
+![Performance](screenshots/14_performance.png)
 
 ---
 
-#### 14. API Documentation (Swagger)
+#### 15. API Documentation (Swagger)
 *FastAPI auto-generated API documentation*
 
-![API Docs](screenshots/14_api_docs.png)
+![API Docs](screenshots/15_api_docs.png)
 
 ---
 
-#### 15. Docker Containers
+#### 16. Docker Containers
 *Running Docker containers (PostgreSQL + FastAPI)*
 
-![Docker](screenshots/15_docker.png)
+![Docker](screenshots/16_docker.png)
 
 ---
 
