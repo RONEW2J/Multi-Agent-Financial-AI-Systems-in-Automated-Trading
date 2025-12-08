@@ -1130,13 +1130,6 @@ curl http://localhost:8000/api/health
 
 ---
 
-#### 16. Terminal Logs
-*Backend logs showing agent activity*
-
-![Logs](screenshots/16_logs.png)
-
----
-
 ### ASCII Diagrams (Alternative if screenshots unavailable)
 
 #### Dashboard Layout
