@@ -1296,7 +1296,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 <div align="center">
 
-**Built with ❤️ for Advanced Programming Course**
+**Built with ❤️ for Project management information system Course**
 
 *Multi-Agent Financial AI Systems in Automated Trading*
 
