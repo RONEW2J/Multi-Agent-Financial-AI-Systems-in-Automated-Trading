@@ -746,5 +746,9 @@ class MarketMonitoringAgent:
         
         return result[:top_n]
 
+    async def predict_price_movement_from_db(self, symbol: str, db: AsyncSession) -> Dict:
+        """Alias for predict_price_movement - gets data from database"""
+        return await self.predict_price_movement(symbol, db)
+
 
 market_monitor = MarketMonitoringAgent()

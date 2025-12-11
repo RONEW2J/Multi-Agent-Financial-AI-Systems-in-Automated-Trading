@@ -329,22 +329,102 @@ const PortfolioAnalysis: React.FC = () => {
                             {(rec.confidence * 100).toFixed(0)}%
                           </Typography>
                         </Grid>
-                        {rec.shares && (
+                        {rec.predicted_change !== undefined && (
                           <Grid item xs={6}>
                             <Typography variant="caption" color="textSecondary">
-                              Shares
+                              Predicted
                             </Typography>
-                            <Typography variant="body2">{rec.shares}</Typography>
+                            <Typography
+                              variant="body2"
+                              color={rec.predicted_change >= 0 ? 'success.main' : 'error.main'}
+                            >
+                              {rec.predicted_change >= 0 ? '+' : ''}{rec.predicted_change.toFixed(2)}%
+                            </Typography>
+                          </Grid>
+                        )}
+                        {rec.direction && (
+                          <Grid item xs={6}>
+                            <Typography variant="caption" color="textSecondary">
+                              Direction
+                            </Typography>
+                            <Chip 
+                              label={rec.direction} 
+                              size="small"
+                              color={rec.direction === 'UP' ? 'success' : rec.direction === 'DOWN' ? 'error' : 'default'}
+                            />
+                          </Grid>
+                        )}
+                        {rec.current_price !== undefined && (
+                          <Grid item xs={6}>
+                            <Typography variant="caption" color="textSecondary">
+                              Current Price
+                            </Typography>
+                            <Typography variant="body2">
+                              ${rec.current_price.toFixed(2)}
+                            </Typography>
+                          </Grid>
+                        )}
+                        {rec.predicted_price !== undefined && (
+                          <Grid item xs={6}>
+                            <Typography variant="caption" color="textSecondary">
+                              Predicted Price
+                            </Typography>
+                            <Typography variant="body2">
+                              ${rec.predicted_price.toFixed(2)}
+                            </Typography>
+                          </Grid>
+                        )}
+                        {rec.position_shares && (
+                          <Grid item xs={6}>
+                            <Typography variant="caption" color="textSecondary">
+                              Shares Held
+                            </Typography>
+                            <Typography variant="body2">{rec.position_shares.toLocaleString()}</Typography>
                           </Grid>
                         )}
                         {rec.position_value && (
                           <Grid item xs={6}>
                             <Typography variant="caption" color="textSecondary">
-                              Value
+                              Position Value
                             </Typography>
                             <Typography variant="body2">
-                              ${rec.position_value.toFixed(2)}
+                              ${rec.position_value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </Typography>
+                          </Grid>
+                        )}
+                        {rec.technical_indicators && Object.keys(rec.technical_indicators).length > 0 && (
+                          <Grid item xs={12}>
+                            <Typography variant="caption" color="textSecondary">
+                              Technical Indicators
+                            </Typography>
+                            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
+                              {rec.technical_indicators.RSI !== undefined && (
+                                <Chip 
+                                  label={`RSI: ${rec.technical_indicators.RSI.toFixed(1)}`} 
+                                  size="small" 
+                                  variant="outlined"
+                                  color={rec.technical_indicators.RSI > 70 ? 'error' : rec.technical_indicators.RSI < 30 ? 'success' : 'default'}
+                                />
+                              )}
+                              {rec.technical_indicators.MACD !== undefined && (
+                                <Chip 
+                                  label={`MACD: ${rec.technical_indicators.MACD.toFixed(2)}`} 
+                                  size="small" 
+                                  variant="outlined"
+                                  color={rec.technical_indicators.MACD > 0 ? 'success' : 'error'}
+                                />
+                              )}
+                            </Box>
+                          </Grid>
+                        )}
+                        {rec.data_source && (
+                          <Grid item xs={12}>
+                            <Chip 
+                              label={`Source: ${rec.data_source}`} 
+                              size="small" 
+                              variant="outlined"
+                              color="info"
+                            />
                           </Grid>
                         )}
                       </Grid>
@@ -367,9 +447,16 @@ const PortfolioAnalysis: React.FC = () => {
                 <Grid item xs={12} md={4} key={index}>
                   <Card variant="outlined">
                     <CardContent>
-                      <Typography variant="h6" gutterBottom>
-                        {opp.symbol}
-                      </Typography>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
+                        <Typography variant="h6">{opp.symbol}</Typography>
+                        {opp.direction && (
+                          <Chip 
+                            label={opp.direction} 
+                            size="small"
+                            color={opp.direction === 'UP' ? 'success' : opp.direction === 'DOWN' ? 'error' : 'default'}
+                          />
+                        )}
+                      </Box>
                       <Typography variant="body2" color="textSecondary" paragraph>
                         {opp.reason}
                       </Typography>
@@ -377,7 +464,7 @@ const PortfolioAnalysis: React.FC = () => {
                       <Grid container spacing={1}>
                         <Grid item xs={6}>
                           <Typography variant="caption" color="textSecondary">
-                            Predicted
+                            Predicted Change
                           </Typography>
                           <Typography
                             variant="body2"
@@ -394,12 +481,67 @@ const PortfolioAnalysis: React.FC = () => {
                             {(opp.confidence * 100).toFixed(0)}%
                           </Typography>
                         </Grid>
-                        <Grid item xs={12}>
-                          <Typography variant="caption" color="textSecondary">
-                            Recommended Shares
-                          </Typography>
-                          <Typography variant="body2">{opp.recommended_shares}</Typography>
-                        </Grid>
+                        {opp.current_price > 0 && (
+                          <Grid item xs={6}>
+                            <Typography variant="caption" color="textSecondary">
+                              Current Price
+                            </Typography>
+                            <Typography variant="body2">
+                              ${opp.current_price.toFixed(2)}
+                            </Typography>
+                          </Grid>
+                        )}
+                        {opp.predicted_price > 0 && (
+                          <Grid item xs={6}>
+                            <Typography variant="caption" color="textSecondary">
+                              Predicted Price
+                            </Typography>
+                            <Typography variant="body2">
+                              ${opp.predicted_price.toFixed(2)}
+                            </Typography>
+                          </Grid>
+                        )}
+                        {opp.recommended_shares > 0 && (
+                          <Grid item xs={12}>
+                            <Typography variant="caption" color="textSecondary">
+                              Recommended Shares
+                            </Typography>
+                            <Typography variant="body2">{opp.recommended_shares}</Typography>
+                          </Grid>
+                        )}
+                        {opp.technical_indicators && Object.keys(opp.technical_indicators).length > 0 && (
+                          <Grid item xs={12}>
+                            <Typography variant="caption" color="textSecondary">
+                              Technical Indicators
+                            </Typography>
+                            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
+                              {opp.technical_indicators.RSI !== undefined && (
+                                <Chip 
+                                  label={`RSI: ${opp.technical_indicators.RSI.toFixed(1)}`} 
+                                  size="small" 
+                                  variant="outlined"
+                                />
+                              )}
+                              {opp.technical_indicators.MACD !== undefined && (
+                                <Chip 
+                                  label={`MACD: ${opp.technical_indicators.MACD.toFixed(2)}`} 
+                                  size="small" 
+                                  variant="outlined"
+                                />
+                              )}
+                            </Box>
+                          </Grid>
+                        )}
+                        {opp.data_source && (
+                          <Grid item xs={12}>
+                            <Chip 
+                              label={`Source: ${opp.data_source}`} 
+                              size="small" 
+                              variant="outlined"
+                              color="info"
+                            />
+                          </Grid>
+                        )}
                       </Grid>
                     </CardContent>
                   </Card>
