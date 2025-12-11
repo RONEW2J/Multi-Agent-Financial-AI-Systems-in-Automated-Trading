@@ -777,22 +777,9 @@ frontend/
 
 ### What Didn't Work
 
-1. **Real-time Data Integration**
-   - Polygon.io API requires premium subscription
-   - Workaround: CSV data with simulated updates
-
-2. **Complex Feature Engineering**
-   - Too many features caused overfitting
-   - Reduced to essential technical indicators
-
-3. **Deep Learning Models**
+1. **Deep Learning Models**
    - LSTM too slow for real-time trading
    - Switched to Random Forest for speed
-
-4. **Sentiment Analysis**
-   - News API access limited
-   - Deferred to future work
-
 ---
 
 ## 🔮 Conclusion & Future Ideas
