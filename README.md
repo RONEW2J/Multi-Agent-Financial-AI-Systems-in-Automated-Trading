@@ -859,7 +859,11 @@ EOF
 # Start Docker containers
 docker-compose up -d --build
 
-# 3. Start frontend (in a new terminal)
+# 3. Download dataset
+Create directory backend/dataset_of_stocks/stocks
+Put https://www.kaggle.com/datasets/svaningelgem/nasdaq-daily-stock-prices/data downloaded datasert into folder
+
+# 4. Start frontend (in a new terminal)
 cd ../frontend
 npm install
 npm run dev
