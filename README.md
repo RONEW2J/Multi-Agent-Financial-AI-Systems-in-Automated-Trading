@@ -985,7 +985,7 @@ curl http://localhost:8000/api/health
 
 ### Data Sources
 
-10. NASDAQ Historical Stock Data - CSV dataset with 3,337 stocks
+10. NASDAQ Historical Stock Data - [CSV dataset with 3,337 stocks](https://www.kaggle.com/datasets/svaningelgem/nasdaq-daily-stock-prices/data)
 
 11. Polygon.io API - https://polygon.io/docs/stocks
 
