@@ -6,6 +6,8 @@ from enum import Enum
 from pathlib import Path
 from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.preprocessing import StandardScaler
+from sklearn.tree import plot_tree
+import matplotlib.pyplot as plt
 import joblib
 
 logger = logging.getLogger(__name__)
@@ -299,12 +301,17 @@ class DecisionMakingAgent:
         
         self.save_model()
         
+        # Save visualizations (feature importance and decision trees)
+        feature_names = ['Predicted_Change', 'Confidence']
+        viz_result = self.save_model_visualizations(feature_names)
+        
         logger.info(f"{self.name}: Decision model trained! Accuracy: {accuracy:.2%}")
         
         return {
             "status": "success",
             "accuracy": float(accuracy),
             "samples_used": len(X),
+            "visualizations": viz_result,
             "timestamp": datetime.now().isoformat()
         }
     
@@ -319,6 +326,161 @@ class DecisionMakingAgent:
         joblib.dump(self.scaler, scaler_path)
         
         logger.info(f"{self.name}: Model saved")
+    
+    def save_model_visualizations(self, feature_names: List[str] = None) -> Dict:
+        """
+        Save visualizations after model training:
+        1. Feature importance bar plot
+        2. Sample decision trees from Gradient Boosting stages
+        """
+        if self.decision_model is None or not self.is_trained:
+            logger.warning(f"{self.name}: No trained model to visualize")
+            return {"status": "error", "message": "Model not trained"}
+        
+        plots_dir = self.models_dir / "plots"
+        plots_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Default feature names if not provided
+        if feature_names is None:
+            feature_names = [
+                'Predicted_Change',
+                'Confidence',
+                'Current_Price',
+                'RSI',
+                'MACD',
+                'BB_Position',
+                'Distance_MA20',
+                'Risk_Tolerance'
+            ]
+        
+        saved_plots = []
+        class_names = ['SELL', 'HOLD', 'BUY']
+        
+        try:
+            # 1. Feature Importance Plot
+            logger.info(f"{self.name}: Creating feature importance plot...")
+            
+            feature_importance = self.decision_model.feature_importances_
+            n_features = min(len(feature_names), len(feature_importance))
+            feature_names = feature_names[:n_features]
+            feature_importance = feature_importance[:n_features]
+            
+            sorted_idx = np.argsort(feature_importance)[::-1]
+            
+            plt.figure(figsize=(10, 6))
+            colors = plt.cm.viridis(np.linspace(0.3, 0.9, n_features))
+            
+            bars = plt.barh(
+                range(n_features),
+                feature_importance[sorted_idx[::-1]],
+                color=[colors[i] for i in sorted_idx[::-1]],
+                edgecolor='black'
+            )
+            plt.yticks(
+                range(n_features),
+                [feature_names[i] for i in sorted_idx[::-1]]
+            )
+            
+            # Add percentage labels
+            for i, (bar, idx) in enumerate(zip(bars, sorted_idx[::-1])):
+                imp = feature_importance[idx]
+                plt.text(bar.get_width() + 0.01, bar.get_y() + bar.get_height()/2,
+                        f'{imp*100:.1f}%', va='center', fontsize=10)
+            
+            plt.xlabel('Feature Importance', fontsize=12)
+            plt.ylabel('Features', fontsize=12)
+            plt.title('Gradient Boosting Classifier - Feature Importance\n(Decision Making Agent)', fontsize=14)
+            plt.xlim(0, max(feature_importance) * 1.3)
+            plt.tight_layout()
+            
+            importance_path = plots_dir / "gb_feature_importance.png"
+            plt.savefig(importance_path, dpi=150, bbox_inches='tight')
+            plt.close()
+            saved_plots.append(str(importance_path))
+            logger.info(f"{self.name}: Feature importance plot saved to {importance_path}")
+            
+            # 2. Decision Tree Visualization from Gradient Boosting stages
+            logger.info(f"{self.name}: Creating decision tree visualizations...")
+            
+            # Get estimators from Gradient Boosting
+            # GradientBoostingClassifier has estimators_ with shape [n_estimators, n_classes]
+            n_estimators = self.decision_model.n_estimators
+            n_classes = len(class_names)
+            
+            # Plot trees from different stages (early, middle, late)
+            stages_to_plot = [0, n_estimators // 2, n_estimators - 1]
+            stages_to_plot = [s for s in stages_to_plot if s < n_estimators]
+            
+            for stage_idx in stages_to_plot:
+                fig, axes = plt.subplots(1, n_classes, figsize=(20, 8))
+                fig.suptitle(f'Gradient Boosting - Stage {stage_idx + 1}/{n_estimators}\nDecision Trees for Each Class', fontsize=14)
+                
+                for class_idx, (ax, class_name) in enumerate(zip(axes, class_names)):
+                    tree = self.decision_model.estimators_[stage_idx, class_idx]
+                    plot_tree(
+                        tree,
+                        feature_names=feature_names,
+                        filled=True,
+                        rounded=True,
+                        fontsize=8,
+                        max_depth=3,
+                        ax=ax
+                    )
+                    ax.set_title(f'Class: {class_name}', fontsize=12)
+                
+                plt.tight_layout()
+                
+                tree_path = plots_dir / f"gb_decision_trees_stage_{stage_idx + 1}.png"
+                plt.savefig(tree_path, dpi=150, bbox_inches='tight')
+                plt.close()
+                saved_plots.append(str(tree_path))
+                logger.info(f"{self.name}: Stage {stage_idx + 1} trees saved to {tree_path}")
+            
+            # 3. Training Loss Plot (Staged Predictions)
+            logger.info(f"{self.name}: Creating staged predictions analysis...")
+            
+            plt.figure(figsize=(10, 6))
+            
+            # Create a summary of model parameters
+            params_text = (
+                f"Model Parameters:\n"
+                f"  • n_estimators: {self.decision_model.n_estimators}\n"
+                f"  • learning_rate: {self.decision_model.learning_rate}\n"
+                f"  • max_depth: {self.decision_model.max_depth}\n"
+                f"  • n_classes: {n_classes}\n"
+                f"\nFeature Importance Ranking:\n"
+            )
+            
+            for i, idx in enumerate(sorted_idx[:5]):
+                params_text += f"  {i+1}. {feature_names[idx]}: {feature_importance[idx]*100:.1f}%\n"
+            
+            plt.text(0.1, 0.5, params_text, fontsize=12, family='monospace',
+                    verticalalignment='center', transform=plt.gca().transAxes)
+            plt.axis('off')
+            plt.title('Gradient Boosting Classifier - Model Summary\n(Decision Making Agent)', fontsize=14)
+            
+            summary_path = plots_dir / "gb_model_summary.png"
+            plt.savefig(summary_path, dpi=150, bbox_inches='tight')
+            plt.close()
+            saved_plots.append(str(summary_path))
+            logger.info(f"{self.name}: Model summary saved to {summary_path}")
+            
+            logger.info(f"{self.name}: All visualizations saved successfully!")
+            
+            return {
+                "status": "success",
+                "plots_saved": saved_plots,
+                "plots_directory": str(plots_dir),
+                "timestamp": datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            logger.error(f"{self.name}: Error creating visualizations: {e}")
+            return {
+                "status": "error",
+                "message": str(e),
+                "plots_saved": saved_plots
+            }
     
     def load_model(self) -> bool:
         try:

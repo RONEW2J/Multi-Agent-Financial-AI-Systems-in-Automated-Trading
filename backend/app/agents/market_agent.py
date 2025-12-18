@@ -8,6 +8,8 @@ from pathlib import Path
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error, mean_absolute_error
+from sklearn.tree import plot_tree
+import matplotlib.pyplot as plt
 import joblib
 import os
 
@@ -382,12 +384,19 @@ class MarketMonitoringAgent:
         logger.info(f"\n💾 Saving model...")
         self.save_model()
         
+        # Save visualizations (feature importance and decision trees)
+        logger.info(f"\n📊 Creating model visualizations...")
+        viz_result = self.save_model_visualizations()
+        training_stats["visualizations"] = viz_result
+        
         logger.info(f"\n{'='*80}")
         logger.info(f" MODEL TRAINING COMPLETE!")
         logger.info(f" Stocks processed: {training_stats['stocks_processed']:,}")
         logger.info(f" Total samples: {training_stats['total_samples']:,}")
         logger.info(f" RMSE: {training_stats['rmse']:.4f}%")
         logger.info(f" MAE: {training_stats['mae']:.4f}%")
+        if viz_result.get("status") == "success":
+            logger.info(f" Plots saved to: {viz_result.get('plots_directory')}")
         logger.info(f"{'='*80}\n")
         
         return {
@@ -408,6 +417,118 @@ class MarketMonitoringAgent:
         joblib.dump(self.feature_columns, self.models_dir / "feature_columns.joblib")
         
         logger.info(f"{self.name}: Model saved to {model_path}")
+    
+    def save_model_visualizations(self) -> Dict:
+        """
+        Save visualizations after model training:
+        1. Feature importance bar plot
+        2. Sample decision trees from Random Forest
+        """
+        if self.price_model is None or not self.is_trained:
+            logger.warning(f"{self.name}: No trained model to visualize")
+            return {"status": "error", "message": "Model not trained"}
+        
+        plots_dir = self.models_dir / "plots"
+        plots_dir.mkdir(parents=True, exist_ok=True)
+        
+        saved_plots = []
+        
+        try:
+            # 1. Feature Importance Plot
+            logger.info(f"{self.name}: Creating feature importance plot...")
+            
+            feature_importance = self.price_model.feature_importances_
+            sorted_idx = np.argsort(feature_importance)[::-1]
+            
+            plt.figure(figsize=(12, 8))
+            plt.barh(
+                range(len(self.feature_columns)),
+                feature_importance[sorted_idx[::-1]],
+                color='steelblue',
+                edgecolor='black'
+            )
+            plt.yticks(
+                range(len(self.feature_columns)),
+                [self.feature_columns[i] for i in sorted_idx[::-1]]
+            )
+            plt.xlabel('Feature Importance', fontsize=12)
+            plt.ylabel('Features', fontsize=12)
+            plt.title('Random Forest Regressor - Feature Importance\n(Market Monitor Agent)', fontsize=14)
+            plt.tight_layout()
+            
+            importance_path = plots_dir / "rf_feature_importance.png"
+            plt.savefig(importance_path, dpi=150, bbox_inches='tight')
+            plt.close()
+            saved_plots.append(str(importance_path))
+            logger.info(f"{self.name}: Feature importance plot saved to {importance_path}")
+            
+            # 2. Decision Tree Visualization (sample trees from the forest)
+            logger.info(f"{self.name}: Creating decision tree visualizations...")
+            
+            # Plot first 3 trees from the forest
+            n_trees_to_plot = min(3, len(self.price_model.estimators_))
+            
+            for tree_idx in range(n_trees_to_plot):
+                plt.figure(figsize=(24, 16))
+                plot_tree(
+                    self.price_model.estimators_[tree_idx],
+                    feature_names=self.feature_columns,
+                    filled=True,
+                    rounded=True,
+                    fontsize=8,
+                    max_depth=4,  # Limit depth for readability
+                    proportion=True
+                )
+                plt.title(f'Random Forest - Decision Tree #{tree_idx + 1}\n(Max Depth=4 for visualization)', fontsize=14)
+                
+                tree_path = plots_dir / f"rf_decision_tree_{tree_idx + 1}.png"
+                plt.savefig(tree_path, dpi=150, bbox_inches='tight')
+                plt.close()
+                saved_plots.append(str(tree_path))
+                logger.info(f"{self.name}: Decision tree #{tree_idx + 1} saved to {tree_path}")
+            
+            # 3. Feature Importance with Top 10 Features (detailed view)
+            plt.figure(figsize=(10, 6))
+            top_n = min(10, len(self.feature_columns))
+            top_features = [self.feature_columns[i] for i in sorted_idx[:top_n]]
+            top_importance = feature_importance[sorted_idx[:top_n]]
+            
+            colors = plt.cm.RdYlGn(np.linspace(0.2, 0.8, top_n))[::-1]
+            bars = plt.barh(range(top_n), top_importance[::-1], color=colors)
+            plt.yticks(range(top_n), top_features[::-1])
+            
+            # Add percentage labels
+            for i, (bar, imp) in enumerate(zip(bars, top_importance[::-1])):
+                plt.text(bar.get_width() + 0.005, bar.get_y() + bar.get_height()/2,
+                        f'{imp*100:.1f}%', va='center', fontsize=10)
+            
+            plt.xlabel('Importance Score', fontsize=12)
+            plt.title('Top 10 Most Important Features\nRandom Forest Regressor', fontsize=14)
+            plt.xlim(0, max(top_importance) * 1.2)
+            plt.tight_layout()
+            
+            top_features_path = plots_dir / "rf_top_features.png"
+            plt.savefig(top_features_path, dpi=150, bbox_inches='tight')
+            plt.close()
+            saved_plots.append(str(top_features_path))
+            logger.info(f"{self.name}: Top features plot saved to {top_features_path}")
+            
+            logger.info(f"{self.name}: All visualizations saved successfully!")
+            
+            return {
+                "status": "success",
+                "plots_saved": saved_plots,
+                "plots_directory": str(plots_dir),
+                "timestamp": datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            logger.error(f"{self.name}: Error creating visualizations: {e}")
+            return {
+                "status": "error",
+                "message": str(e),
+                "plots_saved": saved_plots
+            }
     
     def load_model(self) -> bool:
         try:
